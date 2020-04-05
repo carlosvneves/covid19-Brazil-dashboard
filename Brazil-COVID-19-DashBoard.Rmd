@@ -1,68 +1,222 @@
 ---
 title: "COVID-19 no Brasil"
-author: "Carlos Eduardo Veras Neves (adaptado de Antoine Soetewey)"
+author: "Carlos Eduardo Veras Neves (adaptado de https://github.com/AntoineSoetewey/coronavirus_dashboard)"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
     # social: ["facebook", "twitter", "linkedin"]
-    source_code: embed
+    #source_code: embed
     vertical_layout: fill
 ---
 
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#----------------------------------------------------
+# Pulling the coronvirus data from John Hopkins repo
+# https://github.com/CSSEGISandData/COVID-19
+#----------------------------------------------------
+# Setting functions
+`%>%` <- magrittr::`%>%`
+#----------------------------------------------------
+#------------ Pulling confirmed cases------------
+conf_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
+raw_conf <- read.csv(file = conf_url,
+                     stringsAsFactors = FALSE)
+
+lapply(1:ncol(raw_conf), function(i){
+  if(all(is.na(raw_conf[, i]))){
+    raw_conf <<- raw_conf[, -i]
+    return(print(paste("Column", names(raw_conf)[i], "is missing", sep = " ")))
+  } else {
+    return(NULL)
+  }
+})
+
+# Transforming the data from wide to long
+# Creating new data frame
+df_conf <- raw_conf[, 1:4]
+
+for(i in 5:ncol(raw_conf)){
+  
+  raw_conf[,i] <- as.integer(raw_conf[,i])
+  # raw_conf[,i] <- ifelse(is.na(raw_conf[, i]), 0 , raw_conf[, i])
+  print(names(raw_conf)[i])
+  
+  if(i == 5){
+    df_conf[[names(raw_conf)[i]]] <- raw_conf[, i]
+  } else {
+    df_conf[[names(raw_conf)[i]]] <- raw_conf[, i] - raw_conf[, i - 1]
+  }
+  
+  
+}
+
+
+df_conf1 <-  df_conf %>% tidyr::pivot_longer(cols = dplyr::starts_with("X"),
+                                             names_to = "date_temp",
+                                             values_to = "cases_temp")
+
+# Parsing the date
+df_conf1$month <- sub("X", "",
+                      strsplit(df_conf1$date_temp, split = "\\.") %>%
+                        purrr::map_chr(~.x[1]) )
+
+df_conf1$day <- strsplit(df_conf1$date_temp, split = "\\.") %>%
+  purrr::map_chr(~.x[2])
+
+
+df_conf1$date <- as.Date(paste("2020", df_conf1$month, df_conf1$day, sep = "-"))
+
+# Aggregate the data to daily
+df_conf2 <- df_conf1 %>%
+  dplyr::group_by(Province.State, Country.Region, Lat, Long, date) %>%
+  dplyr::summarise(cases = sum(cases_temp)) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(type = "confirmed",
+                Country.Region = trimws(Country.Region),
+                Province.State = trimws(Province.State))
+
+
+#----------------------------------------------------
+# Pulling death cases
+
+death_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
+raw_death <- read.csv(file =death_url,
+                      stringsAsFactors = FALSE,
+                      fill =FALSE)
+
+lapply(1:ncol(raw_death), function(i){
+  if(all(is.na(raw_death[, i]))){
+    raw_death <<- raw_death[, -i]
+    return(print(paste("Column", names(raw_death)[i], "is missing", sep = " ")))
+  } else {
+    return(NULL)
+  }
+})
+
+# Transforming the data from wide to long
+# Creating new data frame
+df_death <- raw_death[, 1:4]
+
+for(i in 5:ncol(raw_death)){
+  print(i)
+  raw_death[,i] <- as.integer(raw_death[,i])
+  raw_death[,i] <- ifelse(is.na(raw_death[, i]), 0 , raw_death[, i])
+  
+  if(i == 5){
+    df_death[[names(raw_death)[i]]] <- raw_death[, i]
+  } else {
+    df_death[[names(raw_death)[i]]] <- raw_death[, i] - raw_death[, i - 1]
+  }
+}
+
+
+df_death1 <-  df_death %>% tidyr::pivot_longer(cols = dplyr::starts_with("X"),
+                                               names_to = "date_temp",
+                                               values_to = "cases_temp")
+
+# Parsing the date
+df_death1$month <- sub("X", "",
+                       strsplit(df_death1$date_temp, split = "\\.") %>%
+                         purrr::map_chr(~.x[1]) )
+
+df_death1$day <- strsplit(df_death1$date_temp, split = "\\.") %>%
+  purrr::map_chr(~.x[2])
+
+
+df_death1$date <- as.Date(paste("2020", df_death1$month, df_death1$day, sep = "-"))
+
+# Aggregate the data to daily
+df_death2 <- df_death1 %>%
+  dplyr::group_by(Province.State, Country.Region, Lat, Long, date) %>%
+  dplyr::summarise(cases = sum(cases_temp)) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(type = "death",
+                Country.Region = trimws(Country.Region),
+                Province.State = trimws(Province.State))
+# 
+#---------------- Aggregate all cases ----------------
+
+#
+coronavirus <- dplyr::bind_rows(df_conf2, df_death2) %>%
+  as.data.frame()
+
+
+
+
+```
+
 ```{r setup, include=FALSE}
-#------------------ Packages ------------------
 library(flexdashboard)
-# install.packages("devtools")
-# devtools::install_github("RamiKrispin/coronavirus")
-library(coronavirus)
-data(coronavirus)
-update_datasets()
-# View(coronavirus)
+library(tidyverse)
+library(lubridate)
+library(rvest)
+library(stringdist)
+
+
+setwd("C:/GoogleDrive/Colab Notebooks/COVID-19/covid19-Brazil-dashboard")
+
+df_saudegovbr <- read.csv(file ='COVID19_20200404.csv', header = TRUE, sep = ";",
+                      stringsAsFactors = FALSE,
+                      fill =FALSE)
+
 `%>%` <- magrittr::`%>%`
 #------------------ Parameters ------------------
 # Set colors
 # https://www.w3.org/TR/css-color-3/#svg-color
 confirmed_color <- "purple"
 active_color <- "#1f77b4"
-recovered_color <- "forestgreen"
+#recovered_color <- "forestgreen"
 death_color <- "red"
 #------------------ Data ------------------
-df <- coronavirus %>%
-  # dplyr::filter(date == max(date)) %>%
-  dplyr::filter(Country.Region == "Brazil") %>%
-  dplyr::group_by(Country.Region, type) %>%
-  dplyr::summarise(total = sum(cases)) %>%
-  tidyr::pivot_wider(
-    names_from = type,
-    values_from = total
-  ) %>%
-  dplyr::mutate(unrecovered = confirmed - ifelse(is.na(recovered), 0, recovered) - ifelse(is.na(death), 0, death)) %>%
-  dplyr::arrange(-confirmed) %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(country = dplyr::if_else(Country.Region == "United Arab Emirates", "UAE", Country.Region)) %>%
-  dplyr::mutate(country = dplyr::if_else(country == "Mainland China", "China", country)) %>%
-  dplyr::mutate(country = dplyr::if_else(country == "North Macedonia", "N.Macedonia", country)) %>%
-  dplyr::mutate(country = trimws(country)) %>%
-  dplyr::mutate(country = factor(country, levels = country))
-df_daily <- coronavirus %>%
-  dplyr::filter(Country.Region == "Brazil") %>%
-  dplyr::group_by(date, type) %>%
-  dplyr::summarise(total = sum(cases, na.rm = TRUE)) %>%
-  tidyr::pivot_wider(
-    names_from = type,
-    values_from = total
-  ) %>%
-  dplyr::arrange(date) %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(active = confirmed - death - recovered) %>%
-  dplyr::mutate(
-    confirmed_cum = cumsum(confirmed),
-    death_cum = cumsum(death),
-    recovered_cum = cumsum(recovered),
-    active_cum = cumsum(active)
-  )
-df1 <- coronavirus %>% dplyr::filter(date == max(date))
+
+
+df_saudegovbr = df_saudegovbr %>% 
+                mutate(data = as.Date(data, "%d/%m/%Y")) %>% 
+                arrange(data) 
+
+
+
+
+df_regiao = df_saudegovbr %>% 
+            group_by(regiao) %>%
+            summarise(confirmados = sum(casosNovos), 
+                      obitos = sum(obitosNovos)) %>% 
+            mutate(ativos = confirmados - obitos)
+           
+
+df_estado = df_saudegovbr %>% 
+            group_by(estado) %>%
+            summarise(confirmados = sum(casosNovos), 
+                      obitos = sum(obitosNovos))%>%
+            mutate(ativos = confirmados - obitos)
+
+df_brasil = df_saudegovbr %>% 
+            summarise(confirmados = sum(casosNovos), 
+                      obitos = sum(obitosNovos)) %>%
+            mutate(ativos = confirmados - obitos)
+            
+
+df_daily_br = df_saudegovbr %>% group_by(data) %>% 
+              summarise(confirmados = sum(casosNovos), obitos = sum(obitosNovos)) %>% 
+              mutate(ativos = confirmados - obitos) %>%
+              ungroup() %>%
+              mutate( confirmado_cum = cumsum(confirmados),
+                      obito_cum = cumsum(obitos),
+                      ativo_cum = cumsum(ativos))
+              
+df_daily_estados = df_saudegovbr %>% 
+                    group_by(estado, data) %>%
+                    summarise(confirmados = sum(casosNovos), 
+                              obitos = sum(obitosNovos)) %>%
+                    mutate(ativos = confirmados - obitos) %>%
+                    mutate( confirmado_cum = cumsum(confirmados),
+                      obito_cum = cumsum(obitos),
+                      ativo_cum = cumsum(ativos)) %>%
+                    tidyr::pivot_wider(names_from = estado, values_from = confirmado_cum)
+
+
 ```
+
 
 Sumário
 =======================================================================
@@ -74,7 +228,7 @@ Row {data-width=400}
 
 ```{r}
 valueBox(
-  value = paste(format(sum(df$confirmed),  big.mark = ".", decimal.mark =  ","), "", sep = " "),
+  value = paste(format(sum(df_brasil$confirmados),  big.mark = ".", decimal.mark =  ","), "", sep = " "),
   caption = "Número total de casos confirmados",
   icon = "fas fa-user-md",
   color = confirmed_color
@@ -86,8 +240,8 @@ valueBox(
 
 ```{r}
 valueBox(
-  value = paste(format(sum(df$unrecovered, na.rm = TRUE), big.mark = ".", decimal.mark =  ","), " (",
-    round(100 * sum(df$unrecovered, na.rm = TRUE) / sum(df$confirmed), 1),
+  value = paste(format(df_brasil$ativos, big.mark = ".", decimal.mark =  ","), " (",
+    round(100 * df_brasil$ativos/ df_brasil$confirmados, 1),
     "%)",
     sep = ""
   ),
@@ -100,8 +254,8 @@ valueBox(
 
 ```{r}
 valueBox(
-  value = paste(format(sum(df$death, na.rm = TRUE), big.mark = ".", decimal.mark =  ","), " (",
-    round(100 * sum(df$death, na.rm = TRUE) / sum(df$confirmed), 1),
+  value = paste(format(df_brasil$obitos, big.mark = ".", decimal.mark =  ","), " (",
+    round(100 * df_brasil$obitos / df_brasil$confirmados, 1),
     "%)",
     sep = ""
   ),
@@ -115,25 +269,34 @@ valueBox(
 Row
 -----------------------------------------------------------------------
 
-### **Número de casos acumulados por tipo** (Brasil somente)
+### **Número de casos acumulados por tipo - Brasil ** 
     
 ```{r}
-plotly::plot_ly(data = df_daily) %>%
+plotly::plot_ly(data = df_daily_br) %>%
   plotly::add_trace(
-    x = ~date,
-    y = ~active_cum,
+    x = ~data,
+    y = ~ativo_cum,
     type = "scatter",
     mode = "lines+markers",
     name = "Ativos",
     line = list(color = active_color),
     marker = list(color = active_color)
   ) %>%
-  plotly::add_trace(
-    x = ~date,
-    y = ~death_cum,
+    plotly::add_trace(
+    x = ~data,
+    y = ~confirmado_cum,
     type = "scatter",
     mode = "lines+markers",
-    name = "Mortes",
+    name = "Confirmados",
+    line = list(color = confirmed_color),
+    marker = list(color = confirmed_color)
+  ) %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~obito_cum,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Óbitos",
     line = list(color = death_color),
     marker = list(color = death_color)
   ) %>%
@@ -189,7 +352,276 @@ plotly::plot_ly(data = df_daily) %>%
   )
 ```
 
-Números comparados
+
+Números do Brasil
+=======================================================================
+
+Column {data-width=400}
+-------------------------------------
+### **Distribuição dos casos por tipo entre as regiões**
+
+```{r br_porregiao}
+plotly::plot_ly(
+  data = df_regiao,
+  x = ~regiao,
+  y = ~ativos,
+  # text =  ~ confirmed,
+  # textposition = 'auto',
+  type = "bar",
+  name = "Casos Ativos",
+  marker = list(color = active_color)
+) %>%
+  plotly::add_trace(
+    y = ~obitos,
+    # text =  ~ death,
+    # textposition = 'auto',
+    name = "Mortes",
+    marker = list(color = death_color)
+  ) %>%
+  plotly::layout(
+    barmode = "stack",
+    yaxis = list(title = "Total de casos"),
+    xaxis = list(title = ""),
+    hovermode = "compare",
+    margin = list(
+      # l = 60,
+      # r = 40,
+      b = 10,
+      t = 10,
+      pad = 2
+    )
+  )
+```
+
+### **Distribuição dos casos por tipo entre as unidades da federação**
+
+```{r br_porestado}
+plotly::plot_ly(
+  data = df_estado,
+  x = ~estado,
+  y = ~ativos,
+  # text =  ~ confirmed,
+  # textposition = 'auto',
+  type = "bar",
+  name = "Casos Ativos",
+  marker = list(color = active_color)
+) %>%
+  plotly::add_trace(
+    y = ~obitos,
+    # text =  ~ death,
+    # textposition = 'auto',
+    name = "Mortes",
+    marker = list(color = death_color)
+  ) %>%
+  plotly::layout(
+    barmode = "stack",
+    yaxis = list(title = "Total de casos"),
+    xaxis = list(title = ""),
+    hovermode = "compare",
+    margin = list(
+      # l = 60,
+      # r = 40,
+      b = 10,
+      t = 10,
+      pad = 2
+    )
+  )
+```
+
+
+
+Column {data-width=400}
+-------------------------------------
+
+
+### **Número de casos confirmados acumulados - Estados Selecionados** 
+    
+```{r}
+df_daily_estados = df_saudegovbr %>% 
+                    group_by(estado, data) %>%
+                    summarise(confirmados = sum(casosNovos), 
+                              obitos = sum(obitosNovos)) %>%
+                    mutate(ativos = confirmados - obitos) %>%
+                    mutate( confirmado_cum = cumsum(confirmados),
+                      obito_cum = cumsum(obitos),
+                      ativo_cum = cumsum(ativos)) %>%
+                    tidyr::pivot_wider(names_from = estado, values_from = confirmado_cum)
+
+
+plotly::plot_ly(data = df_daily_estados) %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~DF,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "DF") %>%
+    plotly::add_trace(
+    x = ~data,
+    y = ~SP,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "SP") %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~RJ,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "RJ") %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~CE,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "CE") %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~MG,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "MG") %>%
+  plotly::layout(
+    title = "",
+    yaxis = list(title = "Número acumulado de casos"),
+    xaxis = list(title = "Data", range=c('2020-02-25','2020-04-10')),
+    legend = list(x = 0.1, y = 0.9),
+    hovermode = "compare"
+  )
+```
+
+### **Número de novos casos confirmados por dia - Estados Selecionados** 
+    
+```{r}
+df_daily_estados = df_saudegovbr %>% 
+                    group_by(estado, data) %>%
+                    summarise(confirmados = sum(casosNovos), 
+                              obitos = sum(obitosNovos)) %>%
+                    mutate(ativos = confirmados - obitos) %>%
+                    mutate( confirmado_cum = cumsum(confirmados),
+                      obito_cum = cumsum(obitos),
+                      ativo_cum = cumsum(ativos)) %>%
+                    tidyr::pivot_wider(names_from = estado, values_from = confirmados)
+
+
+plotly::plot_ly(data = df_daily_estados) %>% 
+    #plotly::layout(yaxis = list(type = "log")) %>%
+    plotly::add_trace(
+    x = ~data,
+    y = ~DF,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "DF") %>%
+    plotly::add_trace(
+    x = ~data,
+    y = ~SP,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "SP") %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~RJ,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "RJ") %>%
+    plotly::add_trace(
+    x = ~data,
+    y = ~CE,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "CE") %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~MG,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "MG") %>%
+  plotly::layout(
+    title = "",
+    yaxis = list(title = "Número de novos casos confirmados por dia"),
+    xaxis = list(title = "Data",range=c('2020-02-25','2020-04-10')),
+    legend = list(x = 0.1, y = 0.9),
+    hovermode = "compare"
+  )
+```
+
+### **Número de novos casos confirmados por dia (Regressão Linear)- Estados Selecionados** 
+    
+```{r}
+
+fit_DF = lm(log(DF) ~ data, data = df_daily_estados, subset=DF>0)
+fit_SP = lm(log(SP) ~ data, data = df_daily_estados, subset=SP>0)
+fit_RJ = lm(log(RJ) ~ data, data = df_daily_estados, subset=RJ>0)
+
+#----------------------------------------
+# Plotting the data
+df_daily_estados %>%
+  plotly::plot_ly() %>%
+  #plotly::layout(yaxis = list(type = "log")) %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~log(DF),
+    type = "scatter",
+    mode = "markers",
+    name = "DF",
+    color=I('blue')
+  ) %>%
+  plotly::add_lines(
+    x = ~data[as.numeric(names(fit_DF$fitted.values))],
+    y = fitted(fit_DF),
+    name="DF reg.linear",
+    color=I('blue')
+    ) %>%
+    plotly::add_trace(
+    x = ~data,
+    y = ~log(SP),
+    type = "scatter",
+    mode = "markers",
+    name = "SP",
+    color=I('green')
+  ) %>%
+  plotly::add_lines(
+    x = ~data[as.numeric(names(fit_SP$fitted.values))],
+    y = fitted(fit_SP),
+    name="SP reg.linear",
+    color=I('green')
+    ) %>%
+  plotly::add_trace(
+    x = ~data,
+    y = ~log(RJ),
+    type = "scatter",
+    mode = "markers",
+    name = "SP",
+    color=I('red')
+  ) %>%
+  plotly::add_lines(
+    x = ~data[as.numeric(names(fit_RJ$fitted.values))],
+    y = fitted(fit_RJ),
+    name="RJ reg.linear",
+    color=I('red')
+    ) %>%
+  plotly::layout(
+    title = "",
+    legend = list(x = .1, y = 0.8),
+    yaxis = list(title = "Número de novos casos confirmados (por dia) - Log"),
+    xaxis = list(title = "Data", range=c('2020-02-25','2020-04-10')),
+    # paper_bgcolor = "black",
+    # plot_bgcolor = "black",
+    # font = list(color = 'white'),
+    hovermode = "compare",
+    margin = list(
+      # l = 60,
+      # r = 40,
+      b = 10,
+      t = 10,
+      pad = 2
+    )
+  )
+
+
+
+
+```
+
+Comparação com outros países
 =======================================================================
 
 
@@ -200,16 +632,17 @@ Column {data-width=400}
 ### **Novos casos diários**
     
 ```{r}
+
 daily_confirmed <- coronavirus %>%
   dplyr::filter(type == "confirmed") %>%
-  dplyr::filter(date >= "2020-02-29") %>%
+  dplyr::filter(date >= "2020-02-26") %>%
   dplyr::mutate(country = Country.Region) %>%
   dplyr::group_by(date, country) %>%
   dplyr::summarise(total = sum(cases)) %>%
   dplyr::ungroup() %>%
   tidyr::pivot_wider(names_from = country, values_from = total)
 
-
+elements = 28:length(df_daily_br$confirmados)
 
 #----------------------------------------
 # Plotting the data
@@ -217,7 +650,7 @@ daily_confirmed %>%
   plotly::plot_ly() %>%
   plotly::add_trace(
     x = ~date,
-    y = ~Brazil,
+    y = ~df_daily_br$confirmados[elements],
     type = "scatter",
     mode = "lines+markers",
     name = "Brasil"
@@ -262,7 +695,66 @@ daily_confirmed %>%
   )
 ```
 
+### **Número de novos casos diários a partir de 150 novos casos confirmados (Log) e os dias decorridos desde o registro**
 
+
+```{r , echo=FALSE}
+x <- coronavirus[order(coronavirus$date, coronavirus$Country.Region, decreasing = TRUE), ]
+
+onset = x %>% 
+          group_by(Country.Region) %>% 
+          #filter(Country.Region == c('Brazil', 'Italy', 'France')) %>% 
+          filter(type=='confirmed')%>% filter(cases >= 150) %>% 
+          mutate(days_since_case_onset := as.integer(date - min(date)))
+
+# corrigindo a base para os dados do Ministério da Saúde
+onset_br = rev(df_daily_br$confirmados[df_daily_br$confirmados > 150])
+
+onset %>%
+  plotly::plot_ly()%>%
+  plotly::layout(yaxis = list(type = "log")) %>%
+  group_by(Country.Region) %>% 
+  plotly::add_trace(
+    x = ~subset(onset$days_since_case_onset, Country.Region=='Brazil'),
+    y = ~onset_br[1:(length(onset_br))],
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Brasil"
+  ) %>%
+  plotly::add_trace(
+    x = ~subset(onset$days_since_case_onset, Country.Region=='France'),
+    y = ~subset(onset$cases, Country.Region=='France'),
+    type = "scatter",
+    mode = "lines+markers",
+    name = "França"
+  ) %>%
+  plotly::add_trace(
+    x = ~subset(onset$days_since_case_onset, Country.Region=='Spain'),
+    y = ~subset(onset$cases, Country.Region=='Spain'),
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Espanha"
+  ) %>%
+  plotly::add_trace(
+    x = ~subset(onset$days_since_case_onset, Country.Region=='Italy'),
+    y = ~subset(onset$cases, Country.Region=='Italy'),
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Itália"
+  ) %>%
+  plotly::layout(
+    title = "",
+    legend = list(x = 0.1, y = 0.9),
+    yaxis = list(title = "Número de novos casos confirmados (por dia)"),
+    xaxis = list(title = "Dias decorridos desde o caso de número 150"),
+    hovermode = "compare",
+    margin = list(
+    b = 10,
+    t = 10,
+    pad = 2
+    )
+  )
+```
 
 
 ### **Distribuição dos casos por tipo**
@@ -280,7 +772,7 @@ df_EU <- coronavirus %>%
     names_from = type,
     values_from = total
   ) %>%
-  dplyr::mutate(unrecovered = confirmed - ifelse(is.na(recovered), 0, recovered) - ifelse(is.na(death), 0, death)) %>%
+  dplyr::mutate(unrecovered = confirmed - ifelse(is.na(death), 0, death)) %>%
   dplyr::arrange(confirmed) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(country = dplyr::if_else(Country.Region == "United Arab Emirates", "UAE", Country.Region)) %>%
@@ -334,7 +826,7 @@ Row {data-width=400}
 ```{r}
 library(deSolve)
 
-Infected = daily_confirmed$Brazil[daily_confirmed$Brazil>0] #incidência
+Infected = df_daily_br$confirmados[df_daily_br$confirmados> 0]
 N = 211000000 # população Brasileira
 Day <- 1:(length(Infected))
 
@@ -366,7 +858,7 @@ Opt_par <- setNames(Opt$par, c("beta", "gamma"))
 ## Warning in xy.coords(x, y, xlabel, ylabel, log = log): 1 y value <= 0
 ## omitted from logarithmic plot
 
-t <- 1:90 # time in days
+t <- 1:120 # time in days
 fit <- data.frame(ode(y = init, times = t, func = SIR, parms = Opt_par))
 col <- 1:3 # colour
 
@@ -393,7 +885,6 @@ valueBox(
 
 
 
-
 ```
 
 ### infectados_pico {.value-box}
@@ -413,8 +904,27 @@ valueBox(
 
 
 
+```
+
+### infectados_5days {.value-box}
+
+```{r}
+
+
+fivedaysahead = length(Infected) + 5
+
+valueBox(
+  value = paste(format(round(sum(fit$I[1:fivedaysahead]),0), big.mark = ".", decimal.mark =  ","),
+    sep = ""
+  ),
+  caption = "Número total de infectados nos próximos 5 dias", icon = "fas fa-ambulance",
+  color = active_color
+)
+
+
 
 ```
+
 
 ### mortes_pico {.value-box}
 
@@ -441,94 +951,160 @@ Column {data-width=400}
 -------------------------------------
 
 
+
 ### **Modelo de regressão linear para os novos casos diários (escala logarítmica)  **
     
 ```{r}
-library(zoo)
 
-daily_confirmed10 <- coronavirus %>%
-  dplyr::filter(type == "confirmed") %>%
-  dplyr::filter(date >= "2020-02-29") %>%
-  dplyr::mutate(country = Country.Region) %>%
-  dplyr::group_by(date, country) %>%
-  dplyr::summarise(total = log(sum(cases))) %>%
-  dplyr::ungroup() %>%
-  tidyr::pivot_wider(names_from = country, values_from = total)
 
 #----------------------------------------
 # linear fit for data in log scale
-fit_br = lm(Brazil ~ date, data = daily_confirmed10, subset=Brazil>0)
-fit_sp = lm(Spain ~ date, data = daily_confirmed10, subset=Spain>0)
-fit_it = lm(Italy ~ date, data = daily_confirmed10, subset=Spain>0)
-fit_fr = lm(France ~ date, data = daily_confirmed10, subset=France>0)
+fit_br = lm(log(confirmados) ~ data, data = df_daily_br, subset=confirmados>0)
+fit_sp = lm(log(Spain) ~ date, data = daily_confirmed, subset=Spain>0)
+fit_it = lm(log(Italy) ~ date, data = daily_confirmed, subset=Italy>0)
+fit_fr = lm(log(France) ~ date, data = daily_confirmed, subset=France>0)
+
+names(fit_br$fitted.values) = as.character(seq(1:length(fit_br$fitted.values)))
+
+p <- ggplot(df_daily_br, aes(x=data, y=log(confirmados))) +
+    geom_point(shape=1) +    # Use hollow circles
+    geom_smooth(method=lm) +  # Add linear regression line
+    xlab('Data') + ylab('log. casos confirmados')
 
 
+
+fig <- plotly::ggplotly(p)
+fig
 #----------------------------------------
 # Plotting the data
-daily_confirmed10 %>%
+# daily_confirmed %>%
+#   plotly::plot_ly() %>%
+#   #plotly::layout(yaxis = list(type = "log")) %>%
+#   # plotly::add_trace(
+#   #   x = ~date,
+#   #   y = ~log(df_daily_br$confirmados[27:length(df_daily_br$confirmados)]),
+#   #   type = "scatter",
+#   #   mode = "markers",
+#   #   name = "Brasil",
+#   #   color=I('blue')
+#   # ) %>%
+#   # plotly::add_lines(
+#   #   x = ~date[as.numeric(names(fit_br$fitted.values))],
+#   #   y = ~predict(fit_br),
+#   #   name="Brasil reg.linear",
+#   #   color=I('blue')
+#   #   ) %>%
+#   plotly::add_trace(
+#     x = ~date,
+#     y = ~log(France),
+#     type = "scatter",
+#     mode = "markers",
+#     name = "França",
+#     color=I('green')
+#   ) %>%
+#   plotly::add_lines(
+#     x = ~date[as.numeric(names(fit_fr$fitted.values))],
+#     y = fitted(fit_fr),
+#     name="França reg.linear",
+#     color=I('green')
+#     ) %>%
+#   plotly::add_trace(
+#     x = ~date,
+#     y = ~log(Spain),
+#     type = "scatter",
+#     mode = "markers",
+#     name = "Espanha",
+#     color=I('black')
+#   ) %>%
+#   plotly::add_lines(
+#     x = ~date[as.numeric(names(fit_sp$fitted.values))],
+#     y = fitted(fit_sp),
+#     name="Espanha reg.linear",
+#     color=I('black')
+#     ) %>%
+#   plotly::add_trace(
+#     x = ~date,
+#     y = ~log(Italy),
+#     type = "scatter",
+#     mode = "markers",
+#     name = "Itália",
+#     color=I('red')
+#   ) %>%
+#   plotly::add_lines(
+#     x = ~date[as.numeric(names(fit_it$fitted.values))],
+#     y = fitted(fit_it),
+#     name="Itália reg.linear",
+#     color=I('red')
+#     ) %>%
+#    plotly::layout(
+#     title = "",
+#     legend = list(x = .8, y = 0.1),
+#     yaxis = list(title = "Número de novos casos confirmados (por dia) - Log"),
+#     xaxis = list(title = "Data"),
+#     # paper_bgcolor = "black",
+#     # plot_bgcolor = "black",
+#     # font = list(color = 'white'),
+#     hovermode = "compare",
+#     margin = list(
+#       # l = 60,
+#       # r = 40,
+#       b = 10,
+#       t = 10,
+#       pad = 2
+#     )
+#   )
+
+
+
+
+
+
+
+
+```
+
+
+### **Modelo de Previsão(SIR:susceptible-infected-removed) para o Brasil (população de 211 milhões)** 
+
+
+```{r }
+#----------------------------------------
+# Plotting the data
+fit %>%
   plotly::plot_ly() %>%
-  #plotly::layout(yaxis = list(type = "log")) %>%
+  plotly::layout(yaxis = list(type = "log")) %>%
   plotly::add_trace(
-    x = ~date,
-    y = ~Brazil,
+    x = ~time,
+    y = ~S,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Suscetíveis"
+  ) %>%
+  plotly::add_trace(
+    x = ~time,
+    y = ~I,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Infectados"
+  ) %>%
+  plotly::add_trace(
+    x = ~time,
+    y = ~R,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Recuperados"
+  ) %>%
+  plotly::add_trace(
+    x = ~Day,
+    y = ~Infected,
     type = "scatter",
     mode = "markers",
-    name = "Brasil",
-    color=I('blue')
+    name = "Confirmados"
   ) %>%
-  plotly::add_lines(
-    x = ~date[as.numeric(names(fit_br$fitted.values))],
-    y = fitted(fit_br),
-    name="Brasil reg.linear",
-    color=I('blue')
-    ) %>%
-  plotly::add_trace(
-    x = ~date,
-    y = ~France,
-    type = "scatter",
-    mode = "markers",
-    name = "França",
-    color=I('green')
-  ) %>%
-  plotly::add_lines(
-    x = ~date[as.numeric(names(fit_fr$fitted.values))],
-    y = fitted(fit_fr),
-    name="França reg.linear",
-    color=I('green')
-    ) %>%
-  plotly::add_trace(
-    x = ~date,
-    y = ~Spain,
-    type = "scatter",
-    mode = "markers",
-    name = "Espanha",
-    color=I('black')
-  ) %>%
-  plotly::add_lines(
-    x = ~date[as.numeric(names(fit_sp$fitted.values))],
-    y = fitted(fit_sp),
-    name="Espanha reg.linear",
-    color=I('black')
-    ) %>%
-  plotly::add_trace(
-    x = ~date,
-    y = ~Italy,
-    type = "scatter",
-    mode = "markers",
-    name = "Itália",
-    color=I('red')
-  ) %>%
-  plotly::add_lines(
-    x = ~date[as.numeric(names(fit_it$fitted.values))],
-    y = fitted(fit_it),
-    name="Itália reg.linear",
-    color=I('red')
-    ) %>%  
-  
   plotly::layout(
     title = "",
-    legend = list(x = .8, y = 0.1),
-    yaxis = list(title = "Número de novos casos confirmados (por dia) - Log"),
+    legend = list(x = 0.1, y = 0.9),
+    yaxis = list(title = "Número de pessoas"),
     xaxis = list(title = "Data"),
     # paper_bgcolor = "black",
     # plot_bgcolor = "black",
@@ -542,26 +1118,53 @@ daily_confirmed10 %>%
       pad = 2
     )
   )
+
+
+
+
 ```
 
-### **Modelo de Previsão (SIR) para o Brasil (população de 211 milhões)** 
+### **Curva exponencial de infecção prevista para o Brasil ** 
 
 
 ```{r }
-#matplot(fit$time, fit[ , 2:4], type = "l", xlab = "Day", ylab = "Number of subjects", lwd = 2, lty = 1, col = col)
-matplot(fit$time, fit[ , 2:4], type = "l", xlab = "Day", ylab = "Número de pessoas", lwd = 2, lty = 1, col = col, log = "y")
-## Warning in xy.coords(x, y, xlabel, ylabel, log = log): 1 y value <= 0
-## omitted from logarithmic plot
-
-points(Day, Infected)
-legend("bottomright", c("Suscetíveis", "Infectados", "Recuperados"), lty = 1, lwd = 2, col = col, inset = 0.05)
-title("SIR modelo 2019-nCoV Brasil", outer = TRUE, line = -2)
-
-
+#----------------------------------------
+# Plotting the data
+fit %>%
+  plotly::plot_ly() %>%
+  plotly::add_trace(
+    x = ~time,
+    y = ~I,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Infectados"
+  ) %>%
+  plotly::add_trace(
+    x = ~Day,
+    y = ~Infected,
+    type = "scatter",
+    mode = "markers",
+    name = "Confirmados"
+  ) %>%
+  plotly::layout(
+    title = "",
+    legend = list(x = 0.1, y = 0.9),
+    yaxis = list(title = "Número de pessoas", range=c(1,2.5e3)),
+    xaxis = list(title = "Data", range=c(1,40)),
+    # paper_bgcolor = "black",
+    # plot_bgcolor = "black",
+    # font = list(color = 'white'),
+    hovermode = "compare",
+    margin = list(
+      # l = 60,
+      # r = 40,
+      b = 10,
+      t = 10,
+      pad = 2
+    )
+  )
 
 ```
-
-
 
 Mapa
 =======================================================================
